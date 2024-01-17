@@ -1,24 +1,32 @@
 import pyray as raylib
 import math
+import random
 
 import overpass
 import car
 import road
 import building
+import light
 from constants import *
-from globals import camera, roads, buildings
+from globals import camera, roads, buildings, lights, time, paused
+
+def spawn_rate(x):
+    return -8.95231329283598e-19*x**17 + 4.31967000169694e-17*x**16 + 2.58805718149825e-15*x**15 - 2.23814494359364e-13*x**14 + 4.70443715788563e-12*x**13 - 7.54772235401552e-13*x**12 - 3.28570778431105e-11*x**11 - 3.84142447500097e-8*x**10 + 1.3619746937588e-8*x**9 + 4.54299609178217e-5*x**8 - 0.0013192773445446*x**7 + 0.0182270587731075*x**6 - 0.141903845390944*x**5 + 0.628859739453891*x**4 - 1.4872860983282*x**3 + 1.64903911599613*x**2 - 0.519628414894235*x + 0.189744648760354
 
 def main():
-    road_type_counter = 0
-    road_section_counter = 0
+    global time, paused, SCREEN_WIDTH, SCREEN_HEIGHT
 
-    # Initialize window
-    raylib.init_window(IMAGE_SIZE, IMAGE_SIZE, b"Raylib Boilerplate - Python")
+    raylib.set_config_flags(raylib.ConfigFlags.FLAG_WINDOW_RESIZABLE)
+    raylib.init_window(SCREEN_WIDTH, SCREEN_HEIGHT, b"Raylib Boilerplate - Python")
+    raylib.set_target_fps(60)
 
-    # Set the frames-per-second
-    raylib.set_target_fps(1000)
+    SCREEN_HEIGHT = raylib.get_screen_height()
+    SCREEN_WIDTH = raylib.get_screen_width()
 
     camera.zoom = 1.0
+
+    for overpass_object in overpass.data_lights:
+        lights.append(light.Light(overpass_object))
 
     for road_type, overpass_objects in overpass.data_roads.items():
         for overpass_object in overpass_objects:
@@ -28,21 +36,6 @@ def main():
     for overpass_object in overpass.data_buildings:
         buildings.append(building.Building(overpass_object))
     building.Building.create_building_texture()
-
-    # data = [["primary", raylib.Vector2(-400, 30), raylib.Vector2(-101, 0.2)],
-    #         ["primary", raylib.Vector2(-101, 0.2), raylib.Vector2(100, 0.1), raylib.Vector2(150, -50), raylib.Vector2(151, -100), raylib.Vector2(152, -200)],
-    #         ["secondary", raylib.Vector2(0, -201), raylib.Vector2(300, -202)]]
-
-    # data = [
-    #     ["secondary", raylib.Vector2(400, 400), raylib.Vector2(401, 300)],
-    #     ["secondary", raylib.Vector2(300, 400), raylib.Vector2(401, 400.1)],
-    #     ["secondary", raylib.Vector2(401, 400.1), raylib.Vector2(500, 400.1)],
-    #     ["secondary", raylib.Vector2(400, 420), raylib.Vector2(401, 400)],
-    #     ["secondary", raylib.Vector2(400, 500), raylib.Vector2(401, 420)],
-    # ]
-
-    # for r in data:
-    #     roads.append(road.Road(r.pop(0), _points=r))
 
     count = 0
     # the data from overpass is utter dogshit and needs to be cleaned up a lot
@@ -64,33 +57,31 @@ def main():
         # create intersections between road pieces
         r.create_connections()
 
-    # Main game loop
     frame_count = 0
     while not raylib.window_should_close():
-        frame_count += 1
-        if frame_count % 800 == 0:
-            for node in road.Road.dead_end_nodes:
-                if len(node["road"].pieces) == 0:
-                    continue
-                lane = node["road"].pieces[0 if node["type"] == "start" else -1].lanes[0 if node["type"] == "start" else -1]
-                if lane != 0:
-                    lane.cars.append(car.Car(lane))
-
+        if not paused:
+            frame_count += 1
+            time += 1/1000
+            if time > 24: time = 0
+            print(time)
+            if frame_count % 60 == 0:
+                for node in road.Road.dead_end_nodes:
+                    if random.random()*(ROAD_SPAWN_RATES[node["road"].road_type]/spawn_rate(time)) > 1: continue
+                    if len(node["road"].pieces) == 0:
+                        continue
+                    lane = node["road"].pieces[0 if node["type"] == "start" else -1].lanes[0 if node["type"] == "start" else -1]
+                    if lane != 0:
+                        lane.cars.append(car.Car(lane))
+            
         if raylib.is_key_pressed(raylib.KeyboardKey.KEY_SPACE):
-            if road_section_counter != -1:
-                items = list(overpass.roads.items())
-                roads.append(road.Road(items[road_type_counter][0], items[road_type_counter][1][road_section_counter]))
-                road_section_counter += 1
-                if road_section_counter >= len(items[road_type_counter][1]):
-                    road_section_counter = 0
-                    road_type_counter += 1
-                if road_type_counter == 3:
-                    road_section_counter = -1
-        # update
+            paused = not paused
         if raylib.is_mouse_button_down(raylib.MOUSE_BUTTON_RIGHT):
             delta = raylib.get_mouse_delta()
             delta = raylib.vector2_scale(delta, -1.0 / camera.zoom)
             camera.target = raylib.vector2_add(camera.target, delta)
+        if raylib.is_window_resized():
+            SCREEN_HEIGHT = raylib.get_screen_height()
+            SCREEN_WIDTH = raylib.get_screen_width()
         # zoom based on mouse wheel
         wheel = raylib.get_mouse_wheel_move()
         if wheel != 0:
@@ -109,17 +100,25 @@ def main():
         raylib.draw_texture_rec(road.Road.texture.texture, raylib.Rectangle(0, 0, road.Road.texture_size.x, -road.Road.texture_size.y), road.Road.texture_pos, raylib.WHITE)
 
         for r in roads:
-            r.update()
+            if not paused:
+                r.update()
             r.draw_cars()
             r.draw_debug()
+
+        for l in lights:
+            if not paused:
+                l.update()
+            l.draw()
 
         for node in road.Road.dead_end_nodes:
             raylib.draw_circle(int(node["pos"].x), int(node["pos"].y), 4, raylib.GREEN)
 
         # m_pos = raylib.get_screen_to_world_2d(raylib.get_mouse_position(), camera)
 
+
         raylib.end_mode_2d()
-        raylib.draw_fps(IMAGE_SIZE-80, 10)
+        raylib.draw_rectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, raylib.Color(0, 0, 0, int(255*(1-1/4*(math.sin(time/4 - 1) + 3)))))
+        raylib.draw_fps(SCREEN_WIDTH-100, 10)
 
         raylib.end_drawing()
 

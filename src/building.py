@@ -35,8 +35,7 @@ class Building:
         nodes = []
         for node in geometry_object:
             y_offset, x_offset = overpass.geocode_offset(geocode, (node["lat"], node["lon"]))
-            pos = raylib.Vector2(x_offset * IMAGE_SIZE / overpass.SEARCH_RADIUS / IMAGE_ZOOM + IMAGE_SIZE / 2,
-                                y_offset * IMAGE_SIZE / overpass.SEARCH_RADIUS / IMAGE_ZOOM + IMAGE_SIZE / 2)
+            pos = raylib.Vector2(x_offset*2, y_offset*2)
             if pos.x < Building.x_min: Building.x_min = pos.x
             if pos.y < Building.y_min: Building.y_min = pos.y
             if pos.x > Building.x_max: Building.x_max = pos.x

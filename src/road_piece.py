@@ -2,7 +2,8 @@ import math
 import pyray as raylib
 
 from constants import *
-from globals import geocode, roads as global_roads, camera
+import light
+from globals import geocode, roads as global_roads, camera, lights, lanes as global_lanes
 from lane import Lane, Connection
 
 class RoadPiece:
@@ -19,8 +20,6 @@ class RoadPiece:
         self.next_piece = None
         self.previous_piece = None
         self.lanes = []
-        self.connections = []
-        self.has_been_visited = False
         # create lanes
         self.create_lanes()
 
@@ -29,8 +28,8 @@ class RoadPiece:
         lane_angles = []
         for i in range(self.num_lanes):
             # get the start pos of the lane 
-            lane_start_pos = raylib.vector2_add(raylib.vector2_scale(self.normal, (-(self.num_lanes-1)+2*i)*(LANE_WIDTH/2)), self.start_pos)
-            lane_end_pos = raylib.vector2_add(raylib.vector2_scale(self.normal, (-(self.num_lanes-1)+2*i)*(LANE_WIDTH/2)), self.end_pos)
+            lane_start_pos = raylib.vector2_add(raylib.vector2_scale(self.normal, (-(self.num_lanes-1)+2*i)*(LANE_WIDTH/2) * 1.8), self.start_pos)
+            lane_end_pos = raylib.vector2_add(raylib.vector2_scale(self.normal, (-(self.num_lanes-1)+2*i)*(LANE_WIDTH/2) * 1.8), self.end_pos)
             lane_angle = raylib.vector2_angle(raylib.vector2_add(lane_end_pos, raylib.vector2_scale(self.start_pos, -1)), self.normal)/math.pi*180
             if lane_angle < 0:
                 # we only want the angle counter clockwise from the x axis
@@ -44,6 +43,7 @@ class RoadPiece:
         for i in range(self.num_lanes):
             if i < self.num_lanes/2:
                 self.lanes.append(Lane(self, lane_angles[i]["lane_start_pos"], lane_angles[i]["lane_end_pos"]))
+                global_lanes[str(id(self.lanes[-1]))] = self.lanes[-1]
             else:
                 if self.road.is_one_way:
                     # if the lane is one way, fill the spot so that calculations still line up,
@@ -51,6 +51,7 @@ class RoadPiece:
                     self.lanes.append(0)
                     continue
                 self.lanes.append(Lane(self, lane_angles[i]["lane_end_pos"], lane_angles[i]["lane_start_pos"]))
+                global_lanes[str(id(self.lanes[-1]))] = self.lanes[-1]
             if len(self.lanes) > 1:
                 # if both lanes are left and going in the same direction
                 if (i-1 < self.num_lanes/2) and (i < self.num_lanes/2):
@@ -60,6 +61,55 @@ class RoadPiece:
                 elif (i-1 >= self.num_lanes/2) and (i >= self.num_lanes/2):
                     self.lanes[i-1].next_lane = self.lanes[i]
                     self.lanes[i].previous_lane = self.lanes[i-1]
+        my_nodes = [
+            {"type":"start", "pos":self.start_pos}, 
+            {"type":"end", "pos":self.end_pos}]
+        for l in lights:
+            angle = abs(raylib.vector2_angle(raylib.Vector2(1, -0.3), self.slope)*180/math.pi)
+            if angle > 90: angle = 180-angle
+            duration = (angle/90)*light.Light.signal_length
+            was_light_added = False
+            if raylib.vector_2distance(self.start_pos, self.road.start_pos) < LANE_WIDTH/2 or raylib.vector_2distance(self.end_pos, self.road.end_pos) < LANE_WIDTH/2:
+                for node in my_nodes:
+                    if raylib.vector_2distance(node["pos"], l.pos) < LANE_WIDTH/4:
+                        for i in range(self.num_lanes):
+                            if self.lanes[i] != 0:
+                                light_pos = 10/self.length if node["type"] == "start" else 1-10/self.length
+                                if i < self.num_lanes/2 and node["type"] == "end" and (l.direction == "forward" or l.direction == "both"):
+                                    self.lanes[i].lights.append((light_pos, l))
+                                    l.lanes.append({
+                                        "pos": light_pos,
+                                        "lane": self.lanes[i],
+                                        "duration": duration,
+                                        "state": "red",
+                                    })
+                                    was_light_added = True  
+                                elif i >= self.num_lanes/2 and node["type"] == "start" and (l.direction == "backward" or l.direction == "both"):
+                                    self.lanes[i].lights.append((1-light_pos, l))
+                                    l.lanes.append({
+                                        "pos": 1-light_pos,
+                                        "lane": self.lanes[i],
+                                        "duration": duration,
+                                        "state": "red",
+                                    })
+                                    was_light_added = True
+                        break
+            if not was_light_added:
+                if raylib.check_collision_point_line(l.pos, self.start_pos, self.end_pos, int(LANE_WIDTH/4)):
+                    for i in range(self.num_lanes):
+                        if self.lanes[i] != 0:
+                            light_pos = raylib.vector_2distance(self.lanes[i].start_pos, l.pos) / self.length
+                            if ((i < self.num_lanes/2 and (l.direction == "forward" or l.direction == "both"))
+                                or (i >= self.num_lanes/2 and (l.direction == "backward" or l.direction == "both"))):
+                                self.lanes[i].lights.append((light_pos, l))
+                                l.lanes.append({
+                                    "pos": light_pos,
+                                    "lane": self.lanes[i],
+                                    "duration": duration,
+                                    "state": "red",
+                                })
+                                was_light_added = True
+                                
 
     # merge two neighbouring road pieces which are part of the same road
     # this will reduce the number of road pieces in the parent road by 1
@@ -116,14 +166,14 @@ class RoadPiece:
                         continue
                     # if this lane's start is near my lane end
                     previous_distance = raylib.vector_2distance(self.road.pieces[j].lanes[k].start_pos, self.lanes[i].end_pos)
-                    if previous_distance < LANE_WIDTH*self.num_lanes/2:
+                    if previous_distance < LANE_WIDTH*self.num_lanes:
                         previous_lane_potentials.append({
                             "lane": self.road.pieces[j].lanes[k],
                             "distance": previous_distance
                         })
                     # if this lane's end is near my lane start
                     next_distance = raylib.vector_2distance(self.road.pieces[j].lanes[k].end_pos, self.lanes[i].start_pos)
-                    if next_distance < LANE_WIDTH*self.num_lanes/2:
+                    if next_distance < LANE_WIDTH*self.num_lanes:
                         if len(previous_lane_potentials) > 0:
                             if previous_lane_potentials[-1]["lane"] is self.road.pieces[j].lanes[k]:
                                 if next_distance < previous_distance:
@@ -138,14 +188,21 @@ class RoadPiece:
             # pick closest lane start and end
             previous_lane_potentials = sorted(previous_lane_potentials, key=lambda x: x["distance"])
             next_lane_potentials = sorted(next_lane_potentials, key=lambda x: x["distance"])
-            # set previous lane
+            # set next lane
             if len(previous_lane_potentials) > 0:
                 self.lanes[i].next_piece_lane = previous_lane_potentials[0]["lane"]
                 previous_lane_potentials[0]["lane"].previous_piece_lane = self.lanes[i]
-            # set next lane
+                # if not (str(id(self.lanes[i])) in lane_graph):
+                #     lane_graph[str(id(self.lanes[i]))] = {}
+                # lane_graph[str(id(self.lanes[i]))][str(id(previous_lane_potentials[0]["lane"]))] = 0 # zero distance because the nodes are touching
+            # set previous lane
             if len(next_lane_potentials) > 0:
                 self.lanes[i].previous_piece_lane = next_lane_potentials[0]["lane"]
                 next_lane_potentials[0]["lane"].next_piece_lane = self.lanes[i]
+                # if not str(id(next_lane_potentials[0]["lane"])) in lane_graph:
+                #     lane_graph[str(id(next_lane_potentials[0]["lane"]))] = {}
+                # lane_graph[str(id(next_lane_potentials[0]["lane"]))][str(id(self.lanes[i]))] = 0 # zero distance because the nodes are touching
+
         # now we need to make a list of connecting lanes which are part of other roads
         for road in global_roads:
             if road is self.road: continue
@@ -160,9 +217,9 @@ class RoadPiece:
                 connection_other_position = None
                 connection_self_position = None
                 is_intersection = False # if this road's node doesn't just meet a single other node, and instead meets multiple other nodes or a line segment or both
+                collided_types = []
                 for other_node in other_nodes:
                     # check if the nodes of these two roads collide with each other
-                    collided_types = []
                     for node in my_nodes:
                         if raylib.vector_2distance(node["pos"], other_node["pos"]) < LANE_WIDTH/10:
                             collided_types.extend([node["type"], other_node["type"]])
@@ -226,6 +283,15 @@ class RoadPiece:
                                 # print("\t Positions before correction:", connection_self_position, connection_other_position)
                                 correct_self_position = connection_self_position if k < self.num_lanes/2 else 1-connection_self_position
                                 correct_other_position = connection_other_position if j < piece.num_lanes/2 else 1-connection_other_position
+
+                                # if (connection_type == "same" and j < piece.num_lanes/2) or (connection_type == "opposite" and j >= piece.num_lanes/2):
+                                #     if not str(id(self.lanes[k])) in lane_graph:
+                                #         lane_graph[str(id(self.lanes[k]))] = {}
+                                #     lane_graph[str(id(self.lanes[k]))][str(id(piece.lanes[j]))] = correct_self_position*self.length # distance from self node to other node
+                                # if (connection_type == "same" and j >= piece.num_lanes/2) or (connection_type == "opposite" and j < piece.num_lanes/2):
+                                #     if not str(id(piece.lanes[j])) in lane_graph:
+                                #         lane_graph[str(id(piece.lanes[j]))] = {}
+                                #     lane_graph[str(id(piece.lanes[j]))][str(id(self.lanes[k]))] = correct_self_position*self.length # distance from self node to other node
                                 # print("\t Positions after correction:", correct_self_position, correct_other_position)
                                 self.lanes[k].connections.add(Connection(self.lanes[k], piece.lanes[j], correct_self_position, correct_other_position))
                                 piece.lanes[j].connections.add(Connection(piece.lanes[j], self.lanes[k], correct_other_position, correct_self_position))
@@ -241,6 +307,14 @@ class RoadPiece:
                             # piece.lanes[j] is already checked at the top of this loop
                             if self.lanes[self_index] == 0:
                                 continue
+                            # if (self_index < self.num_lanes/2 and collided_types[0] == "end") or (self_index >= self.num_lanes/2 and collided_types[0] == "start"):
+                            #     if not str(id(self.lanes[self_index])) in lane_graph:
+                            #         lane_graph[str(id(self.lanes[self_index]))] = {}
+                            #     lane_graph[str(id(self.lanes[self_index]))][str(id(piece.lanes[j]))] = 0 # zero distance because the nodes are touching
+                            # elif (self_index >= self.num_lanes/2 and collided_types[0] == "end") or (self_index < self.num_lanes/2 and collided_types[0] == "start"):
+                            #     if not str(id(piece.lanes[j])) in lane_graph:
+                            #         lane_graph[str(id(piece.lanes[j]))] = {}
+                                # lane_graph[str(id(piece.lanes[j]))][str(id(self.lanes[self_index]))] = 0 # zero distance because the nodes are touching
                             self.lanes[self_index].connections.add(Connection(self.lanes[self_index], piece.lanes[j], correct_self_position, correct_other_position))
                             piece.lanes[j].connections.add(Connection(piece.lanes[j], self.lanes[self_index], correct_other_position, correct_self_position))
                             

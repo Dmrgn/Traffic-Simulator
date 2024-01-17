@@ -6,7 +6,7 @@ import json
 
 from globals import geocode as global_geocode
 
-SEARCH_RADIUS = 500
+SEARCH_RADIUS = 100
 
 with open("../data/roads.json", "r") as f:
     data = json.load(f)
@@ -31,8 +31,6 @@ def get_roads_in_geocode(g):
     stops = []
     buildings = []
     for element in result["elements"]:
-        if not "geometry" in element:
-            continue
         if "highway" in element["tags"]:
             if (element["tags"]["highway"] in "motorway motorway_link primary"):
                 roads["primary"].append(element)
@@ -43,6 +41,8 @@ def get_roads_in_geocode(g):
             elif (element["tags"]["highway"] in "traffic_signals"):
                 lights.append(element)
         elif ("building" in element["tags"]):
+            if not "geometry" in element:
+                continue
             buildings.append(element["geometry"])
     
     return {"roads":roads, "lights":lights, "stops":stops, "buildings": buildings}
@@ -51,5 +51,5 @@ def get_roads_in_geocode(g):
 def geocode_offset(origin, geocode):
     return (-(geocode[0]-origin[0])*111111, (geocode[1]-origin[1])*111111*math.cos(math.radians(geocode[0])))
 
-# with open("../data/medium_roads.json", "w") as f:
+# with open("../data/small_roads.json", "w") as f:
 #     json.dump(get_roads_in_geocode(global_geocode), f)

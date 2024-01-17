@@ -33,6 +33,8 @@ class Road:
         self.road_type = road_type
         self.num_lanes = ROAD_LANES[self.road_type]
         self.id = overpass_object["id"]
+        self.connecting_nodes = {}
+        self.is_dead_end = {"start": True, "end": True}
         # collect a list of the geometry points which make up this road
         points = []
         if overpass_object is None:
@@ -45,8 +47,7 @@ class Road:
         else:
             for point in overpass_object["geometry"]:
                 y_offset, x_offset = overpass.geocode_offset(geocode, (point["lat"], point["lon"]))
-                pos = raylib.Vector2(x_offset * IMAGE_SIZE / overpass.SEARCH_RADIUS / IMAGE_ZOOM + IMAGE_SIZE / 2,
-                                y_offset * IMAGE_SIZE / overpass.SEARCH_RADIUS / IMAGE_ZOOM + IMAGE_SIZE / 2)
+                pos = raylib.Vector2(x_offset*2, y_offset*2)
                 points.append(pos)
                 if pos.x < Road.x_min: Road.x_min = pos.x
                 if pos.y < Road.y_min: Road.y_min = pos.y
@@ -99,24 +100,31 @@ class Road:
         else:
             global_roads.remove(road_data["road"])
 
+    # updates self.is_dead_end and self.connecting_nodes based on neighbouring roads
     def find_connecting_roads(self):
-        self.connecting_roads = {"start":[], "end":[]}
+        self.connecting_nodes = {"start":[], "end":[]}
         my_nodes = [
             {"type":"start", "pos":self.start_pos, "road":self}, 
             {"type":"end", "pos":self.end_pos, "road":self}]
         for r in global_roads:
             if r is self: continue
-            if r.num_lanes != self.num_lanes: continue
             other_nodes = [
                 {"my_type":None, "other_type":"start", "pos":r.start_pos, "road": r}, 
                 {"my_type":None, "other_type":"end", "pos":r.end_pos, "road": r}]
             for my_node in my_nodes:
+                for piece in r.pieces:
+                    if (raylib.vector_2distance(my_node["pos"], piece.start_pos) < LANE_WIDTH/10 
+                        or raylib.vector_2distance(my_node["pos"], piece.end_pos) < LANE_WIDTH/10 
+                        or raylib.check_collision_point_line(my_node["pos"], piece.start_pos, piece.end_pos, LANE_WIDTH)):
+                        self.is_dead_end[my_node["type"]] = False
                 for other_node in other_nodes:
-                    if raylib.vector_2distance(my_node["pos"], other_node["pos"]) < LANE_WIDTH/10 or raylib.check_collision_point_line():
-                        other_node["my_type"] = my_node["type"]
-                        self.connecting_roads[my_node["type"]].append(other_node)
+                    if raylib.vector_2distance(my_node["pos"], other_node["pos"]) < LANE_WIDTH/10:
+                        self.is_dead_end[my_node["type"]] = False
+                        if r.num_lanes == self.num_lanes:
+                            other_node["my_type"] = my_node["type"]
+                            self.connecting_nodes[my_node["type"]].append(other_node)
         for node in my_nodes:
-            if len(self.connecting_roads[node["type"]]) == 0:
+            if self.is_dead_end[node["type"]]:
                 Road.dead_end_nodes.append(node)
 
     # check if we can merge with any connecting roads
@@ -129,8 +137,8 @@ class Road:
         self.find_connecting_roads()
         for my_node in my_nodes:
             # if there is only one connected road to this node, then add that road as road pieces to this road
-            if len(self.connecting_roads[my_node["type"]]) == 1:
-                self.merge_road(self.connecting_roads[my_node["type"]][0])
+            if len(self.connecting_nodes[my_node["type"]]) == 1:
+                self.merge_road(self.connecting_nodes[my_node["type"]][0])
     
     # not used for now
     # might be a problem calling find_connecting_roads twice because it adds duplicates to self.dead_end_nodes
@@ -143,13 +151,13 @@ class Road:
     #     has_merged_road_pieces = True
     #     while has_merged_road_pieces:
     #         has_merged_road_pieces = False
-    #         if len(self.connecting_roads["start"]) > 1: # in theory this should never be 1 because 2 road intersections should have been contracted in the previous step
+    #         if len(self.connecting_nodes["start"]) > 1: # in theory this should never be 1 because 2 road intersections should have been contracted in the previous step
     #             # if the first road piece is small enough so that it may be confusing when we create intersections later
     #             if self.pieces[0].length < 4*LANE_WIDTH:
     #                 if len(self.pieces) > 1: # if there is another piece to merge with, otherwise we're fucked
     #                     self.pieces[0].merge_road_piece(self.pieces[1])
     #                     has_merged_road_pieces = True
-    #         if len(self.connecting_roads["end"]) > 1:
+    #         if len(self.connecting_nodes["end"]) > 1:
     #             if self.pieces[-1].length < 4*LANE_WIDTH:
     #                 if len(self.pieces) > 1: # if there is another piece to merge with, otherwise we're screwed
     #                     self.pieces[-1].merge_road_piece(self.pieces[-2])

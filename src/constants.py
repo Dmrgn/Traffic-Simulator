@@ -1,6 +1,7 @@
 import pyray as raylib
 
-IMAGE_SIZE = 1000
+SCREEN_WIDTH = raylib.get_screen_width()
+SCREEN_HEIGHT = raylib.get_screen_height()
 IMAGE_ZOOM = 1
 LANE_WIDTH = 5
 ROAD_COLOURS = {
@@ -13,5 +14,14 @@ ROAD_LANES = {
     "secondary": 2,
     "tertiary": 2,
 }
+ROAD_SPAWN_RATES = {
+    "primary": 2,
+    "secondary": 4,
+    "tertiary": 8,
+}
+ROAD_SPEED_LIMITS = {
+    "primary": 2,
+    "secondary": 1.4,
+    "tertiary": 1,
+}
 MOUSE_ZOOM_INCREMENT = 0.125
-DRAW_OVERLAY = False
